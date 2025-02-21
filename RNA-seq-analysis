@@ -1,0 +1,97 @@
+import pandas as pd
+import numpy as np
+from scipy import stats
+from statsmodels.stats.multitest import multipletests
+
+# Load RNA-seq count matrix
+def load_counts(file_path):
+    df = pd.read_csv(file_path, index_col=0)
+    return df
+
+# Load metadata with added debugging
+def load_metadata(meta_path):
+    try:
+        meta = pd.read_csv(meta_path, delimiter="\t")  # Use tab delimiter for .txt file
+        print("Metadata file loaded successfully.")
+        print("First few rows of metadata:")
+        print(meta.head())  # Print first few rows
+        print("Metadata columns:")
+        print(meta.columns)  # Print column names
+        return meta
+    except Exception as e:
+        print(f"Error loading metadata: {e}")
+        return None
+
+# Normalize raw counts using TPM
+def normalize_tpm(counts_df):
+    gene_lengths = counts_df.iloc[:, 0]  # Assume first column has gene lengths
+    counts = counts_df.iloc[:, 1:]       
+
+    rpk = counts.div(gene_lengths, axis=0)
+    tpm = rpk.div(rpk.sum(axis=0), axis=1) * 1e6
+    return tpm
+
+# fferential expression analysis
+def differential_expression(tpm_df, metadata, control_group, treatment_group):
+    if metadata is None:
+        print("Metadata is not available. Exiting function.")
+        return None
+
+    if 'Group' not in metadata.columns or 'Sample' not in metadata.columns:
+        print("Error: 'Group' or 'Sample' column not found in metadata.")
+        print("Available columns:", metadata.columns)
+        return None
+
+    control_samples = metadata[metadata['Group'] == control_group]['Sample'].values
+    treatment_samples = metadata[metadata['Group'] == treatment_group]['Sample'].values
+
+    control_expr = tpm_df[control_samples]
+    treatment_expr = tpm_df[treatment_samples]
+
+    p_values = []
+    log_fold_changes = []
+
+    for gene in tpm_df.index:
+        control_vals = control_expr.loc[gene].values
+        treatment_vals = treatment_expr.loc[gene].values
+
+        if np.all(control_vals == 0) or np.all(treatment_vals == 0):
+            p_values.append(1)
+            log_fold_changes.append(0)
+        else:
+            t_stat, p_val = stats.ttest_ind(treatment_vals, control_vals, equal_var=False)
+            log_fc = np.log2(np.mean(treatment_vals) + 1) - np.log2(np.mean(control_vals) + 1)
+            p_values.append(p_val)
+            log_fold_changes.append(log_fc)
+
+    results = pd.DataFrame({
+        'Gene': tpm_df.index,
+        'Log2FC': log_fold_changes,
+        'P-value': p_values
+    })
+
+    results['Adjusted P-value'] = multipletests(results['P-value'], method='fdr_bh')[1]
+
+    results.to_csv("differential_expression_results.csv", index=False)
+
+    return results
+
+# MAIN EXECUTION
+counts_file = "/Users/owensmacbook/Downloads/GeneLabData/GLDS-373_rna_seq_Normalized_Counts.csv"
+metadata_file = "/Users/owensmacbook/Downloads/GeneLabData/s_OSD-373.txt"
+
+counts_df = load_counts(counts_file)
+metadata = load_metadata(metadata_file)
+
+if metadata is not None:
+    print("Final metadata columns:", metadata.columns)
+
+tpm_df = normalize_tpm(counts_df)
+
+control_group = "Control"
+treatment_group = "Treated"
+
+results = differential_expression(tpm_df, metadata, control_group, treatment_group)
+
+if results is not None:
+    print(results.head())
