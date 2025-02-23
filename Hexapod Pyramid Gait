@@ -1,0 +1,89 @@
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40); // PCA9685 at default I2C address
+
+// Servo calibration settings
+#define SERVO_MIN  150  // Min pulse length for PCA9685
+#define SERVO_MAX  600  // Max pulse length for PCA9685
+
+// Servo indexes for hexapod legs (PCA9685 Channels)
+const int LEG[6][3] = {
+  {0, 1, 2},   // Leg 1: Coxa, Femur, Tibia
+  {3, 4, 5},   // Leg 2
+  {6, 7, 8},   // Leg 3
+  {9, 10, 11}, // Leg 4
+  {12, 13, 14},// Leg 5
+  {15, 16, 17} // Leg 6
+};
+
+// Define Tripod Groups (A & B)
+const int GROUP_A[3] = {0, 3, 4}; // Legs that move first
+const int GROUP_B[3] = {1, 2, 5}; // Legs that move next
+
+// Leg position variables
+float coxaAngle[6] = {0, 0, 0, 0, 0, 0}; 
+float femurAngle[6] = {45, 45, 45, 45, 45, 45};  
+float tibiaAngle[6] = {90, 90, 90, 90, 90, 90};
+
+// Walking parameters
+const float STEP_SIZE = 20;  // Step distance
+const int STEP_TIME = 300;   // Time per step (ms)
+
+// Function to move a single servo
+void moveServo(int servoNum, float angle) {
+  int pulseLength = map(angle, 0, 180, SERVO_MIN, SERVO_MAX);
+  pwm.setPWM(servoNum, 0, pulseLength);
+}
+
+// Function to update all leg servos
+void updateLegs() {
+  for (int i = 0; i < 6; i++) {
+    moveServo(LEG[i][0], coxaAngle[i]);  // Coxa
+    moveServo(LEG[i][1], femurAngle[i]); // Femur
+    moveServo(LEG[i][2], tibiaAngle[i]); // Tibia
+  }
+}
+
+// Move a group of legs in a pyramid gait step
+void moveLegGroup(const int group[3], float liftAngle, float forwardMove) {
+  // Lift legs
+  for (int i = 0; i < 3; i++) {
+    femurAngle[group[i]] = liftAngle;
+    tibiaAngle[group[i]] = liftAngle + 30; // Slight lift
+  }
+  updateLegs();
+  delay(STEP_TIME / 2);
+
+  // Move forward
+  for (int i = 0; i < 3; i++) {
+    coxaAngle[group[i]] += forwardMove;
+  }
+  updateLegs();
+  delay(STEP_TIME / 2);
+
+  // Lower legs back to ground
+  for (int i = 0; i < 3; i++) {
+    femurAngle[group[i]] = 45;  // Return femur to neutral
+    tibiaAngle[group[i]] = 90;  // Return tibia to neutral
+  }
+  updateLegs();
+  delay(STEP_TIME / 2);
+}
+
+// Tripod Gait Walking Sequence
+void walkPyramidGait() {
+  moveLegGroup(GROUP_A, 30, STEP_SIZE); // Move first set of legs
+  moveLegGroup(GROUP_B, 30, STEP_SIZE); // Move second set of legs
+}
+
+void setup() {
+  pwm.begin();
+  pwm.setPWMFreq(50); // Set frequency to 50Hz for servos
+  updateLegs(); // Set initial positions
+  delay(500);
+}
+
+void loop() {
+  walkPyramidGait();
+}
